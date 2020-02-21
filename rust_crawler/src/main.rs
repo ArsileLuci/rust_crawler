@@ -5,9 +5,6 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::collections::HashMap;
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-
 extern crate url;
 use url::Url;
 
@@ -133,10 +130,13 @@ async fn crawl(hc: &mut FileHasher) {
         let mut hash_line = vec!(HashBox::new(), HashBox::new());
         let mut hb_index : usize = 1;
         let mut counter = 0;
+
+        let words_per_claster = 64;
+
         println!("{}", fna);
-        //let mut file = File::create(fna.clone()).unwrap();
+        let mut file = File::create(fna.clone()).unwrap();
         for word in list {
-            if counter >= 128 {
+            if counter >= words_per_claster {
                 counter = 0;
                 hb_index += 1;
                 hash_line.push(HashBox::new());
@@ -147,10 +147,10 @@ async fn crawl(hc: &mut FileHasher) {
             hash_line[hb_index].add_hash(&word);
             counter += 1;
 
-            //file.write_all(&en_stemmer.stem(&word).as_bytes()).unwrap();
-            //file.write(b" ").unwrap();
+            file.write_all(&en_stemmer.stem(&word).as_bytes()).unwrap();
+            file.write(b" ").unwrap();
         }
-        hc.add(hash_line, &String::from(filename));
+        hc.add(hash_line, &String::from(filename[8..index].trim_end()));
 
         count+=1;
         if count >= required_count {
@@ -158,9 +158,7 @@ async fn crawl(hc: &mut FileHasher) {
         }
     }
     println!("ready");
-    println!("{:?}", hc.look_out_hash("macro").unwrap());
-    println!("{:?}", hc.look_out_hash("flutter").unwrap());
-    println!("{:?}", hc.look_out_hash("zhopa").unwrap());
+    println!("\"rust\" found in: {:?}", hc.look_out_hash("rust").unwrap());
 
     return;
 }
