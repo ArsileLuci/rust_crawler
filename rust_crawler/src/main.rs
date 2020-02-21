@@ -131,12 +131,12 @@ async fn crawl(hc: &mut FileHasher) {
         let mut hb_index : usize = 1;
         let mut counter = 0;
 
-        let words_per_claster = 64;
+        let words_per_cluster = 32;
 
         println!("{}", fna);
         let mut file = File::create(fna.clone()).unwrap();
         for word in list {
-            if counter >= words_per_claster {
+            if counter >= words_per_cluster {
                 counter = 0;
                 hb_index += 1;
                 hash_line.push(HashBox::new());
@@ -158,7 +158,7 @@ async fn crawl(hc: &mut FileHasher) {
         }
     }
     println!("ready");
-    println!("\"rust\" found in: {:?}", hc.look_out_hash("rust").unwrap());
+    println!("\"rust\" probably in: {:?}", hc.look_out_hash("rust").unwrap());
 
     return;
 }
@@ -175,25 +175,28 @@ struct HashBox {
 
 impl HashBox {
     fn get_word_hash(hashable: &str) -> u128 {
-        let mut h = hashable.bytes(); 
-        1u128 << (96+ hashable.len()%32) |
-        1u128 << (64+ (h.next().unwrap() as u32 % 32)) |
-        1u128 << ((h.next().unwrap() as u32 % 32)) |
-        1u128 << (32+ (h.rev().next().unwrap() as u32 % 32))
+        let mut xor_product = 0;
+        hashable.chars().for_each(|x|xor_product ^= x as u32);
+        let mut h = hashable.bytes();
+        1u128 << (96 + hashable.len() % 16) |
+        1u128 << (112 + xor_product % 16) |
+        1u128 << (64 + ((h.next().unwrap() as u32 * 17) % 32)) |
+        1u128 << (((h.next().unwrap() as u32 * 19) % 32)) |
+        1u128 << (32 + (h.rev().next().unwrap() as u32 % 32))
     }
     fn get_starts_with_hash(hashable: &str) -> u128 {
         let mut h = hashable.bytes(); 
-        1u128 << (96 + (h.next().unwrap() as u128 % 32)) |
-        1u128 << (64 + (h.next().unwrap() as u128 % 32)) |
-        1u128 << (32 + (h.next().unwrap() as u128 % 32)) |
-        1u128 << (h.next().unwrap() as u128 % 32)
+        1u128 << (96 + (h.next().unwrap() as u32 % 32)) |
+        1u128 << (64 + (h.next().unwrap() as u32 % 32)) |
+        1u128 << (32 + (h.next().unwrap() as u32 % 32)) |
+        1u128 << (h.next().unwrap() as u32 % 32)
     }
     fn get_ends_with_hash(hashable: &str) -> u128 {
         let mut h = hashable.bytes().rev(); 
-        1u128 << (96 + (h.next_back().unwrap() as u128 % 32)) |
-        1u128 << (64 + (h.next_back().unwrap() as u128 % 32)) |
-        1u128 << (32 + (h.next_back().unwrap() as u128 % 32)) |
-        1u128 << (h.next_back().unwrap() as u128 % 32)
+        1u128 << (96 + (h.next_back().unwrap() as u32 % 32)) |
+        1u128 << (64 + (h.next_back().unwrap() as u32 % 32)) |
+        1u128 << (32 + (h.next_back().unwrap() as u32 % 32)) |
+        1u128 << (h.next_back().unwrap() as u32 % 32)
     }
     fn get_hash4(hashable: &str) -> u128 {
         murmur3::murmur3_x64_128(&mut hashable.as_bytes(), 4).unwrap() &
