@@ -27,13 +27,14 @@ async fn main() {
     loop 
     {
         let mut command = String::new();
+        let mut hash_controller = FileHasher::new();
         match io::stdin().read_line(&mut command) {
             Ok(_) => {
 
                 println!("{}",command.trim_end().to_lowercase().as_str());
                 match command.trim_end().to_lowercase().as_str() {
                     "crawl" => {
-                        crawl().await;
+                        crawl(&mut hash_controller).await;
                     },
                     "query" => {},
                     "help" => {},
@@ -45,7 +46,7 @@ async fn main() {
     }
 }
 
-async fn crawl() {
+async fn crawl(hc: &mut FileHasher) {
     println!("Type your link");
     let mut link = String::new();
     match io::stdin().read_line(&mut link){
@@ -71,8 +72,6 @@ async fn crawl() {
     }
     //index and repeat protection
     let mut browsed : HashMap<String, u8> = HashMap::new();
-
-    let mut hasher = DefaultHasher::new();
     //
     let en_stemmer = Stemmer::create(Algorithm::English);
 
@@ -123,67 +122,80 @@ async fn crawl() {
                 }
             }
         }
-        println!("words found{}", list.len());
+        println!("words found:{}", list.len());
         if list.len() < 1024 {
             continue;
         }
 
 
         list.sort();
-        let mut bx = HashBox::new();
 
+        let mut hash_line = vec!(HashBox::new(), HashBox::new());
+        let mut hb_index : usize = 1;
+        let mut counter = 0;
         println!("{}", fna);
         //let mut file = File::create(fna.clone()).unwrap();
-        for word in list{
+        for word in list {
+            if counter >= 128 {
+                counter = 0;
+                hb_index += 1;
+                hash_line.push(HashBox::new());
+            }
+            //println!("word:\"{}\" at index: {} len {}",&word,counter+128*(hb_index-1), &word.len());
             
-            let hash = word.hash(&mut hasher);
-            bx.add_hash(&word);
-
+            hash_line[0].add_hash(&word);
+            hash_line[hb_index].add_hash(&word);
+            counter += 1;
 
             //file.write_all(&en_stemmer.stem(&word).as_bytes()).unwrap();
             //file.write(b" ").unwrap();
         }
-        
+        hc.add(hash_line, &String::from(filename));
 
         count+=1;
         if count >= required_count {
             break;
         }
     }
+    println!("ready");
+    println!("{:?}", hc.look_out_hash("macro").unwrap());
+    println!("{:?}", hc.look_out_hash("flutter").unwrap());
+    println!("{:?}", hc.look_out_hash("zhopa").unwrap());
 
     return;
 }
 
+#[derive(Debug)]
 struct HashBox {
-    hash1:u128,
-    hash2:u128,
-    hash3:u128,
+    words_hash:u128,
+    starts_with_hash:u128,
+    ends_with_hash:u128,
     hash4:u128,
     hash5:u128,
     hash6:u128,
 } 
 
 impl HashBox {
-    fn get_hash1(hashable: &str) -> u128 {
-        let mut h = hashable.chars(); 
-        1u128 << (96+hashable.len()%32) |
-        1u128 << (64+ (h.nth(0).unwrap() as u32 % 32)) |
-        1u128 << (32+ (h.nth_back(0).unwrap() as u32 % 32)) |
-        1u128 << ((h.nth(0).unwrap() as u32 % 32))
+    fn get_word_hash(hashable: &str) -> u128 {
+        let mut h = hashable.bytes(); 
+        1u128 << (96+ hashable.len()%32) |
+        1u128 << (64+ (h.next().unwrap() as u32 % 32)) |
+        1u128 << ((h.next().unwrap() as u32 % 32)) |
+        1u128 << (32+ (h.rev().next().unwrap() as u32 % 32))
     }
-    fn get_hash2(hashable: &str) -> u128 {
-        let mut h = hashable.chars(); 
-        1u128 << (96 + (h.nth(0).unwrap() as u128 % 32)) |
-        1u128 << (64 + (h.nth(0).unwrap() as u128 % 32)) |
-        1u128 << (32 + (h.nth(0).unwrap() as u128 % 32)) |
-        1u128 << (h.nth(0).unwrap() as u128 % 32)
+    fn get_starts_with_hash(hashable: &str) -> u128 {
+        let mut h = hashable.bytes(); 
+        1u128 << (96 + (h.next().unwrap() as u128 % 32)) |
+        1u128 << (64 + (h.next().unwrap() as u128 % 32)) |
+        1u128 << (32 + (h.next().unwrap() as u128 % 32)) |
+        1u128 << (h.next().unwrap() as u128 % 32)
     }
-    fn get_hash3(hashable: &str) -> u128 {
-        let mut h = hashable.chars(); 
-        1u128 << (96 + (h.nth_back(0).unwrap() as u128 % 32)) |
-        1u128 << (64 + (h.nth_back(0).unwrap() as u128 % 32)) |
-        1u128 << (32 + (h.nth_back(0).unwrap() as u128 % 32)) |
-        1u128 << (h.nth_back(0).unwrap() as u128 % 32)
+    fn get_ends_with_hash(hashable: &str) -> u128 {
+        let mut h = hashable.bytes().rev(); 
+        1u128 << (96 + (h.next_back().unwrap() as u128 % 32)) |
+        1u128 << (64 + (h.next_back().unwrap() as u128 % 32)) |
+        1u128 << (32 + (h.next_back().unwrap() as u128 % 32)) |
+        1u128 << (h.next_back().unwrap() as u128 % 32)
     }
     fn get_hash4(hashable: &str) -> u128 {
         murmur3::murmur3_x64_128(&mut hashable.as_bytes(), 4).unwrap() &
@@ -201,9 +213,9 @@ impl HashBox {
 
     pub fn new() -> HashBox {
         HashBox {
-            hash1 : 0,
-            hash2 : 0,
-            hash3 : 0,
+            words_hash : 0,
+            starts_with_hash : 0,
+            ends_with_hash : 0,
             hash4 : 0,
             hash5 : 0,
             hash6 : 0
@@ -211,19 +223,51 @@ impl HashBox {
     }
 
     pub fn match_hashes(&self, hashable : &str) -> bool {
-        self.hash1 & HashBox::get_hash1(hashable) != 0 &&
-        self.hash2 & HashBox::get_hash2(hashable) != 0 &&
-        self.hash3 & HashBox::get_hash3(hashable) != 0 &&
-        self.hash4 & HashBox::get_hash4(hashable) != 0
+        let word = HashBox::get_word_hash(hashable);
+        let start = HashBox::get_starts_with_hash(hashable);
+        let end = HashBox::get_ends_with_hash(hashable);
+
+
+        (self.words_hash & word) == word &&
+        (self.starts_with_hash & start) == start &&
+        (self.ends_with_hash & end) == end 
     }
 
     pub fn add_hash(&mut self, hashable : &str) {
-        self.hash1 |= HashBox::get_hash1(hashable);
-        self.hash2 |= HashBox::get_hash2(hashable);
-        self.hash3 |= HashBox::get_hash3(hashable); 
-        self.hash4 |= HashBox::get_hash4(hashable);
+        self.words_hash |= HashBox::get_word_hash(hashable);
+        self.starts_with_hash |= HashBox::get_starts_with_hash(hashable);
+        self.ends_with_hash |= HashBox::get_ends_with_hash(hashable);
 
-        println!("hash1 {} hash2 {} hash3 {} hash4 {}", self.hash1,self.hash2,self.hash3,self.hash4);
+        //println!("words_hash {} starts_with_hash {} ends_with_hash {}", self.words_hash,self.starts_with_hash,self.ends_with_hash);
     }
 }
 
+#[derive(Debug)]
+struct FileHasher {
+    map : HashMap<String, Vec<HashBox>>
+}
+
+impl FileHasher {
+    pub fn new() -> Self {
+        FileHasher {
+            map: HashMap::new()
+        }
+    }
+    pub fn add(&mut self, v:Vec<HashBox> , k: &str){
+        self.map.insert(String::from(k), v);
+    }
+
+    pub fn look_out_hash(&mut self, look_out_str:&str) -> Option<Vec<String>> {
+        let mut vec : Vec<String> = Vec::new();
+        for item in self.map.iter(){
+            if item.1[1..].iter().any(|x|x.match_hashes(look_out_str)) {
+                vec.push(item.0.to_string());
+            }
+        }
+        if vec.len() > 0 {
+            return Some(vec);
+        }
+
+        None
+    }
+}
