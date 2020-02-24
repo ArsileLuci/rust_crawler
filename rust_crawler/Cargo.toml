@@ -13,4 +13,4 @@ reqwest = "0.10.1"
 lazy_static = "1.4.0"
 rust-stemmers = {path ="./rust-stemmers" }
 url = "2.1.1"
-murmur3 = "*"
+memmap = "0.7.0"
