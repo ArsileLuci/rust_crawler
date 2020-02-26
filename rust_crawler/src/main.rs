@@ -141,7 +141,7 @@ async fn crawl(hc: &mut FileHasher) {
         for content in RE.split(res.as_str()) {
             let trim = content.trim();
             for word in RE2.captures_iter(trim){
-                if word[0].len() >= 4 {
+                if word[0].len() >= 3 {
                     list.push(word[0].to_lowercase());
                 }
             }

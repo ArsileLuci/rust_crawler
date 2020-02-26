@@ -30,17 +30,33 @@ impl HashBox {
     }
     fn get_starts_with_hash(hashable: &str) -> u128 {
         let mut h = hashable.bytes();
-        1u128 << (96 + (h.next().unwrap() as u32 % 32))
-            | 1u128 << (64 + (h.next().unwrap() as u32 % 32))
-            | 1u128 << (32 + (h.next().unwrap() as u32 % 32))
-            | 1u128 << (h.next().unwrap() as u32 % 32)
+        let len = h.len();
+        let mut result = 1u128 << (96 + (h.next().unwrap() as u32 % 32));
+        if len > 1 {
+            result |= 1u128 << (64 + (h.next().unwrap() as u32 % 32));
+        }
+        if len > 2 {
+            result |= 1u128 << (32 + (h.next().unwrap() as u32 % 32));
+        }
+        if len > 3 {
+            result |= 1u128 << (h.next().unwrap() as u32 % 32);
+        }
+        result
     }
     fn get_ends_with_hash(hashable: &str) -> u128 {
         let mut h = hashable.bytes().rev();
-        1u128 << (96 + (h.next_back().unwrap() as u32 % 32))
-            | 1u128 << (64 + (h.next_back().unwrap() as u32 % 32))
-            | 1u128 << (32 + (h.next_back().unwrap() as u32 % 32))
-            | 1u128 << (h.next_back().unwrap() as u32 % 32)
+        let len = h.len();
+        let mut result = 1u128 << (96 + (h.next_back().unwrap() as u32 % 32));
+        if len > 1{
+            result |= 1u128 << (64 + (h.next_back().unwrap() as u32 % 32));
+        }
+        if len > 2 {
+            result |= 1u128 << (32 + (h.next_back().unwrap() as u32 % 32));
+        }
+        if len > 3 {
+            result |= 1u128 << (h.next_back().unwrap() as u32 % 32);
+        }
+        result
     }
     
     pub fn match_ends_with(&self, h: &str) -> bool {
