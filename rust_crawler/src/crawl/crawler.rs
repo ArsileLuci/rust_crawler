@@ -41,8 +41,7 @@ pub async fn crawl(hc: &mut FileHasher) {
     }
     
     let mut crawler = Crawler::new();
-    crawler.init(link);
-    crawler.crawl(hc, required_count, index_file).await;
+    crawler.crawl(hc, required_count, index_file,link).await;
 
 }
 
@@ -56,7 +55,8 @@ struct Crawler<'a> {
     ru_stemmer: Stemmer,
     browsed_count: u32,
     http_client: reqwest::Client,
-    processing_queue: collections::VecDeque<String>,
+    external_processing_queue: collections::VecDeque<String>,
+    internal_processing_queue: collections::VecDeque<String>, 
 }
 
 impl Crawler<'_> {
@@ -64,28 +64,37 @@ impl Crawler<'_> {
         Crawler {
             html_tag_regex : Regex::new("<[^>]*>").unwrap(),
             word_regex : Regex::new("\\p{Alphabetic}\\w+").unwrap(),
-            href_regex : Regex::new("href=[\"'](/?([\\.\\.]/)*|(https?://)?[\\w\\.+=\\-;?&]+(/[\\w\\.+\\-=;?&]+)*/?)[\"']").unwrap(),
+            //href_regex : Regex::new("href=[\"'](/?([\\.\\.]/)*|(https?://)?[\\w\\.+=\\-;?&]+(/[\\w\\.+\\-=;?&]+)*/?)[\"']").unwrap(),
+            href_regex : Regex::new("href=[\"']([/\\..\\w]+)[\"']").unwrap(),
             browsed_links: collections::HashSet::new(),
             robots_hm : collections::HashMap::new(),
             en_stemmer : Stemmer::create(Algorithm::English),
             ru_stemmer : Stemmer::create(Algorithm::Russian),
             browsed_count : 0,
             http_client : reqwest::Client::new(),
-            processing_queue : collections::VecDeque::new(),
+            external_processing_queue : collections::VecDeque::new(),
+            internal_processing_queue : collections::VecDeque::new(),
         }
     }
-    pub fn init(&mut self, link: String) {
-        self.processing_queue.push_back(link);
-    }
 
-    pub async fn crawl<'a>(&'a mut self, hash_controller: &mut FileHasher, count: u32, mut index_file: File) {
+    pub async fn crawl<'a>(&'a mut self, hash_controller: &mut FileHasher, count: u32, mut index_file: File, i_link:String) {
+        let mut internal_link : String = url::Url::parse(&i_link).unwrap().domain().unwrap().to_string();
+        self.internal_processing_queue.push_back(i_link);
 
         loop {
             let link;
-            match self.processing_queue.pop_front() {
+            match self.internal_processing_queue.pop_front() {
                 None => {
-                    println!("not found enough links");
-                    break;
+                    match self.external_processing_queue.pop_front() {
+                        None => {
+                            println!("not found enough links");
+                            break;
+                        }
+                        Some(external_link) => {
+                            link = external_link.clone();
+                            internal_link = url::Url::parse(&external_link).unwrap().domain().unwrap().to_string();
+                        }
+                    }
                 }
                 Some(w) => {
                     link = w;
@@ -132,7 +141,14 @@ impl Crawler<'_> {
 
             for href in self.href_regex.captures_iter(response.as_str()) {
                 let doc = Url::parse(link.trim_end()).unwrap();
-                &self.processing_queue.push_back(doc.join(&href[1]).unwrap().into_string());
+                let l = doc.join(&href[1]).unwrap().into_string();
+                if l.contains(&internal_link){
+                    &self.internal_processing_queue.push_back(l);
+                }
+                else {
+                    &self.external_processing_queue.push_back(l);
+                }
+                
             }
 
             let mut list: Vec<String> = std::vec::Vec::new();
