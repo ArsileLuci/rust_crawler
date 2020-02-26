@@ -75,7 +75,7 @@ async fn crawl(hc: &mut FileHasher) {
     lazy_static! {
         static ref RE: Regex = Regex::new("<[^>]*>").unwrap();
         static ref RE2: Regex = Regex::new("\\p{Alphabetic}\\w+").unwrap();
-        static ref RE3: Regex = Regex::new("href=\"(/?([\\.\\.]/)*[\\w\\.]+(/[\\w\\.]+)*)\"").unwrap();
+        static ref RE3: Regex = Regex::new("href=[\"'](/?([\\.\\.]/)*|(https?://)?[\\w\\.+=\\-;?&]+(/[\\w\\.+\\-=;?&]+)*/?)[\"']").unwrap();
     }
     //index and repeat protection
     let mut browsed : HashMap<String, u8> = HashMap::new();
@@ -85,15 +85,30 @@ async fn crawl(hc: &mut FileHasher) {
     proccessing_queue.push_back(link);
     loop
     {
-        let link = proccessing_queue.pop_front().unwrap();
+        let link;
+        match proccessing_queue.pop_front() {
+            None => {
+                println!("not found enough links");
+                break;
+            }
+            Some(w) => {
+                link = w;
+            }
+        }
 
         let mut filename = link.clone();
-        filename = filename.replace("/", ".");
+        filename = filename.replace("/", ".").replace("?",".");
+        if filename.ends_with("css") ||
+           filename.ends_with("jpg") ||
+           filename.ends_with("png") ||
+           filename.ends_with("js") ||
+           filename.ends_with("wasm"){
+               continue;
+        }
         match browsed.get(&filename) {
             Some(_) => continue,
             None => {},
         }
-
         println!("Crawling from {}", link.trim_end());
         let res = client.get(link.trim_end())
             .send()
@@ -102,8 +117,8 @@ async fn crawl(hc: &mut FileHasher) {
             .text()
             .await
             .unwrap();
-        let index : usize;
-
+        //println!("{}", ptr);
+        let index : usize; 
         match filename.find('#') {
             Some(n) => {
                 index = n;
@@ -113,6 +128,7 @@ async fn crawl(hc: &mut FileHasher) {
             }
         }
         browsed.insert(filename.clone(), 0);
+        println!("{}.txt", &filename[8..index].trim_end());
         let fna = format!("{}.txt", &filename[8..index].trim_end());
         index_file.write_all(format!("{}:{},\n", link.trim_end(), fna).as_bytes()).unwrap();
         
@@ -144,7 +160,6 @@ async fn crawl(hc: &mut FileHasher) {
         let mut hb_ptr = 0;
         let words_per_cluster = HashBox::size();
 
-        println!("{}", fna);
         let mut file = File::create(fna.clone()).unwrap();
         for word in list {
             if counter >= words_per_cluster {
@@ -165,7 +180,6 @@ async fn crawl(hc: &mut FileHasher) {
             hb_ptr += b" ".len() as u64;
         }
         hc.add(hash_line, &String::from(filename[8..index].trim_end()));
-
         count+=1;
         if count >= required_count {
             break;
