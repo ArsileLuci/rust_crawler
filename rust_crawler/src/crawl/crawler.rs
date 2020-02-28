@@ -78,7 +78,11 @@ impl Crawler<'_> {
     }
 
     pub async fn crawl<'a>(&'a mut self, hash_controller: &mut FileHasher, count: u32, mut index_file: File, i_link:String) {
-        let mut internal_link : String = url::Url::parse(&i_link).unwrap().domain().unwrap().to_string();
+        let mut internal_link : String = url::Url::parse(&i_link)
+                                                        .unwrap()
+                                                        .domain()
+                                                        .unwrap()
+                                                        .to_string();
         self.internal_processing_queue.push_back(i_link);
 
         loop {
@@ -150,7 +154,6 @@ impl Crawler<'_> {
                 }
                 
             }
-
             let mut list: Vec<String> = std::vec::Vec::new();
             for content in self.html_tag_regex.split(response.as_str()) {
                 let trim = content.trim();
@@ -205,14 +208,17 @@ impl Crawler<'_> {
 
         return;
     }
+    
     async fn can_parse(&mut self, link: &str) -> bool {
         if link.ends_with("css")
+        || link.ends_with("js")
+        || link.ends_with("pdf") 
+        || link.ends_with("ttf")
+        || link.ends_with("wasm")
         || link.ends_with("jpg")
         || link.ends_with("png")
-        || link.ends_with("js")
-        || link.ends_with("wasm")
-        || link.ends_with("pdf") 
-        || link.ends_with("ttf") {
+        || link.ends_with("bmp")
+        || link.ends_with("ico") {
             return false;
         }
 

@@ -12,8 +12,6 @@ extern crate reqwest;
 
 extern crate tokio;
 
-#[macro_use] extern crate lazy_static;
-
 #[tokio::main]
 async fn main() {
     let mut hash_controller = FileHasher::new();
@@ -43,5 +41,3 @@ async fn main() {
         }
     }
 }
-
-
