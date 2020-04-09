@@ -3,8 +3,8 @@ use crate::index::fprocessing::eval;
 use crate::index::lexem::Lexem;
 use std::collections::HashMap;
 use memmap::MmapOptions;
-use std::io::Write;
-use std::fs::File;
+use std::io::{Write, Read};
+use std::fs::{File, OpenOptions};
 
 #[derive(Debug)]
 pub struct HashBox {
@@ -125,27 +125,75 @@ impl FileHasher {
     pub fn look_out_hash<'a>(&'a mut self, lx: Lexem) -> Vec<String> {
 
         let mut result:Vec<String> = Vec::new();
-        //let mut result: HashMap<String,Vec<&'a HashBox>> = HashMap::new();
         for item in self.map.iter() {
             if eval(&lx, &item.1[0], None) {
-                let file = File::open(&format!("{}.txt",item.0)).unwrap();
+                let file = File::open(&format!("parsed/{}",item.0)).unwrap();
                 let mmap = unsafe { MmapOptions::new().map(&file).unwrap() };
-                //let r = item.1[1..].iter().skip_while(|x| !eval(&lx, x, Some(&mmap))).next();
                 for hbx in item.1[1..].iter() {
                     if eval(&lx, hbx, Some(&mmap)) {
                         result.push(item.0.to_string());
                         break;
                     }
                 }
-
-                // match r {
-                //     Some(_) => {
-                //         result.push(item.0.to_string());
-                //     },
-                //     None => {}
-                // }
             }
         }
         result
+    }
+
+    pub fn write_to_file(
+        &self,
+        path : &str,
+        keys : &Vec<String>,
+    )
+    {
+        let mut file = File::create(path).unwrap();
+
+        for key in keys {
+            let item = self.map.get(key).unwrap();
+            println!("{}", item.len());
+            let usize_buf : [u8; 8] = unsafe {std::mem::transmute(item.len())};
+            file.write(&usize_buf).expect("never fails");
+            for hb in item {
+                let bytes: [u8; 56] = unsafe {std::mem::transmute_copy(hb)};
+                file.write(&bytes).expect("never fails");
+            }
+        }
+    }
+
+    pub fn read_from_stash(
+        path: &str,
+        links: Vec<String>
+    ) -> Self {
+        let mut hasher = FileHasher::new();
+        let mut buf :[u8; 56] = [0;56];
+        let mut usize_buf : [u8; 8] = [0;8];
+        let mut ptr: usize = 0;
+        let mut idx: usize = 0;
+        match OpenOptions::new().read(true).open(path) {
+            Ok(mut file) => {
+                let mut bytes: Vec<u8> = Vec::new();
+                file.read_to_end(&mut bytes).expect("can't read cache");
+                while ptr < bytes.len() {
+                    usize_buf.copy_from_slice(&bytes[ptr..ptr+8]);
+                    let size : usize = unsafe {std::mem::transmute(usize_buf)};
+                    println!("{}", size);
+                    ptr += 8;
+                    let mut hash_vec : Vec<HashBox> = Vec::new(); 
+                    for i in 0..size {
+                        buf.copy_from_slice(&bytes[ptr..ptr+56]);
+                        let hb : HashBox = unsafe {std::mem::transmute(buf)};
+                        hash_vec.push(hb);
+                        ptr+=56;
+                    }
+                    hasher.add(hash_vec, &links[idx]);
+                    idx+=1;
+                }
+                //std::mem::transmute(e: T) 
+
+            }
+            Err(err) => {
+            }
+        }
+        hasher
     }
 }

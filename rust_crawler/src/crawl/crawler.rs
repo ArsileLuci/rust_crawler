@@ -19,7 +19,7 @@ use rust_stemmers::{Algorithm, Stemmer};
 
 extern crate robotstxt;
 
-pub async fn crawl(hc: &mut FileHasher) {
+pub async fn crawl<'a>(hc: &mut FileHasher, crawler: &mut Crawler<'a>) {
     println!("Type your link");
     let mut link = String::new();
     match io::stdin().read_line(&mut link) {
@@ -34,22 +34,20 @@ pub async fn crawl(hc: &mut FileHasher) {
     }
     let required_count: u32 = count_str.trim_end().parse().unwrap();
 
-    let index_file;
-    match File::open("index.txt") {
-        Err(_) => index_file = File::create("index.txt").unwrap(),
-        Ok(file) => index_file = file,
-    }
     
-    let mut crawler = Crawler::new();
-    crawler.crawl(hc, required_count, index_file,link).await;
+    crawler.crawl(hc, required_count,link).await;
+
+    hc.write_to_file("./hashes.cache", &crawler.keys_order);
 
 }
 
-struct Crawler<'a> {
+pub struct Crawler<'a> {
+    index_file: File,
     html_tag_regex: Regex,
     word_regex: Regex,
     href_regex: Regex,
     browsed_links: collections::HashSet<String>,
+    pub keys_order: Vec<String>,
     robots_hm: collections::HashMap<String, robotstxt::RobotFileParser<'a>>,
     en_stemmer: Stemmer,
     ru_stemmer: Stemmer,
@@ -60,13 +58,32 @@ struct Crawler<'a> {
 }
 
 impl Crawler<'_> {
-    pub fn new() -> Self {
+    pub fn new(mut index: File) -> Self {
+        let mut visited: collections::HashSet<String> = collections::HashSet::new();
+        let mut keys = Vec::<String>::new();
+        let mut string: String = String::new();
+        index.read_to_string(&mut string);
+        let rows = string.split("\n");
+        let mut paths : Vec<String> = Vec::new();
+        for row in rows {
+            if row == "" {
+                break;
+            }
+            let mut split = row.split("|");
+            let url = split.next().expect("index corrupted");
+            let path = split.next().expect("index corrupted");
+            visited.insert(url.to_owned());
+            keys.push(path.to_owned());
+        }
+
         Crawler {
+            index_file : index,
             html_tag_regex : Regex::new("<[^>]*>").unwrap(),
             word_regex : Regex::new("\\p{Alphabetic}\\w+").unwrap(),
             //href_regex : Regex::new("href=[\"'](/?([\\.\\.]/)*|(https?://)?[\\w\\.+=\\-;?&]+(/[\\w\\.+\\-=;?&]+)*/?)[\"']").unwrap(),
             href_regex : Regex::new("href=[\"']([/\\..\\w]+)[\"']").unwrap(),
-            browsed_links: collections::HashSet::new(),
+            browsed_links: visited,
+            keys_order: keys,
             robots_hm : collections::HashMap::new(),
             en_stemmer : Stemmer::create(Algorithm::English),
             ru_stemmer : Stemmer::create(Algorithm::Russian),
@@ -77,7 +94,13 @@ impl Crawler<'_> {
         }
     }
 
-    pub async fn crawl<'a>(&'a mut self, hash_controller: &mut FileHasher, count: u32, mut index_file: File, i_link:String) {
+    pub async fn crawl<'a>(
+        &'a mut self, 
+        hash_controller: &mut FileHasher, 
+        count: u32, 
+        i_link:String
+    ) 
+    {
         let mut internal_link : String = url::Url::parse(&i_link)
                                                         .unwrap()
                                                         .domain()
@@ -127,7 +150,6 @@ impl Crawler<'_> {
                 Err(_) => continue,
             }
 
-            //println!("{}", ptr);
             let index: usize;
             match filename.find('#') {
                 Some(n) => {
@@ -137,14 +159,12 @@ impl Crawler<'_> {
                     index = filename.len();
                 }
             }
+
             println!("{}.txt", &filename[8..index].trim_end());
             let fna = format!("{}.txt", &filename[8..index].trim_end());
-            index_file
-                .write_all(format!("{}:{},\n", link.trim_end(), fna).as_bytes())
-                .unwrap();
-
+            
             for href in self.href_regex.captures_iter(response.as_str()) {
-                let doc = Url::parse(link.trim_end()).unwrap();
+                let doc = Url::parse(link.trim_end()).expect("error during url parsing");
                 let l = doc.join(&href[1]).unwrap().into_string();
                 if l.contains(&internal_link){
                     &self.internal_processing_queue.push_back(l);
@@ -168,15 +188,14 @@ impl Crawler<'_> {
                 continue;
             }
 
-            list.sort();
-
             let mut hash_line = vec![HashBox::new(0), HashBox::new(0)];
             let mut hb_index: usize = 1;
             let mut counter = 0;
             let mut hb_ptr = 0;
             let words_per_cluster = HashBox::size();
 
-            let mut file = File::create(fna.clone()).unwrap();
+            let mut file = File::create(format!("parsed/{}", fna)).unwrap();
+            let mut stemmed_file = File::create(format!("stemmed/{}", fna)).unwrap();
             for word in list {
                 if counter >= words_per_cluster {
                     counter = 0;
@@ -187,24 +206,31 @@ impl Crawler<'_> {
                 hash_line[0].add_hash(&word);
                 hash_line[hb_index].add_hash(&word);
                 counter += 1;
-                let stemmed_word = &self.en_stemmer.stem(&word);
-                let buff = word.as_bytes(); //= stemmed_word.as_bytes();
+                let en_stemmed = &self.en_stemmer.stem(&word).to_owned();
+                let stemmed_word = &self.ru_stemmer.stem(en_stemmed);
+                
+                let buff = word.as_bytes();
                 hb_ptr += buff.len() as u64;
+                //
                 file.write_all(buff).unwrap();
                 file.write(b" ").unwrap();
                 hb_ptr += b" ".len() as u64;
+                //
+                stemmed_file.write(stemmed_word.as_bytes()).unwrap();
+                stemmed_file.write(b" ").unwrap();
+
             }
-            &hash_controller.add(hash_line, &String::from(filename[8..index].trim_end()));
+            
+            &self.index_file
+                .write_all(format!("{}|{}\n", link.trim_end(), fna).as_bytes())
+                .expect("error during writing to index file");
+            &hash_controller.add(hash_line, &fna);
+            self.keys_order.push(fna);
             self.browsed_count += 1;
             if self.browsed_count >= count {
                 break;
             }
         }
-        println!("ready");
-        println!(
-            "\"rust\" probably in: {:?}",
-            &hash_controller.look_out_hash(lexem::Lexem::WithFilter(Filter::Word("rust".to_string())))
-        );
 
         return;
     }

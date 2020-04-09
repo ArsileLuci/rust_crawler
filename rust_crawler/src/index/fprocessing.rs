@@ -7,29 +7,6 @@ use std::str;
 use std::io::Write;
 use std::mem;
 
-pub fn get_index(file_path: &str) -> Vec<HashBox> {
-    let file = File::open(file_path).unwrap();
-    let mmap = unsafe { MmapOptions::new().map(&file).unwrap() };
-    let mut objects: Vec<HashBox> = Vec::new();
-    let mut array: [u8; 56] = [0; 56];
-    mmap.chunks(54).for_each(|x| {
-        array.copy_from_slice(x);
-        objects.push(unsafe { mem::transmute::<[u8; 56], HashBox>(array) });
-        println!("{:?}", objects);
-    }); // .for_each(|f|objects.push( unsafe { mem::transmute::<&[u8; 54], HashBox>(f)}));
-        //
-    objects
-}
-
-pub fn load_initial() {}
-
-pub fn query(lx: Lexem) -> Vec<String> {
-    let mut names: Vec<String> = Vec::new();
-    let map: HashMap<String, Vec<HashBox>> = HashMap::new();
-
-    names
-}
-
 pub fn eval(lx: &Lexem, h: &HashBox, mem: Option<&[u8]>) -> bool {
     match lx {
         Lexem::And(l, r) => eval_and(&*l, &*r, h, mem),
