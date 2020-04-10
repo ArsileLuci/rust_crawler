@@ -19,6 +19,9 @@ use rust_stemmers::{Algorithm, Stemmer};
 
 extern crate robotstxt;
 
+type Table = HashMap<String, u32>;
+type TableF = HashMap<String, f64>; 
+
 pub async fn crawl<'a>(hc: &mut FileHasher, crawler: &mut Crawler<'a>) {
     println!("Type your link");
     let mut link = String::new();
@@ -55,6 +58,11 @@ pub struct Crawler<'a> {
     http_client: reqwest::Client,
     external_processing_queue: collections::VecDeque<String>,
     internal_processing_queue: collections::VecDeque<String>, 
+    //TF_IDF
+    pages_count: u32,
+    tf_counts_table:HashMap<String,Table>,
+    idf_counts_table: Table,
+    tf_idf: HashMap<String, TableF>,
 }
 
 impl Crawler<'_> {
@@ -88,6 +96,12 @@ impl Crawler<'_> {
             en_stemmer : Stemmer::create(Algorithm::English),
             ru_stemmer : Stemmer::create(Algorithm::Russian),
             browsed_count : 0,
+            //TF-IDF
+            tf_counts_table : HashMap::new(),
+            idf_counts_table : HashMap::new(),
+            pages_count : 0,
+            tf_idf: HashMap::new(),
+            //
             http_client : reqwest::Client::new(),
             external_processing_queue : collections::VecDeque::new(),
             internal_processing_queue : collections::VecDeque::new(),
@@ -107,7 +121,7 @@ impl Crawler<'_> {
                                                         .unwrap()
                                                         .to_string();
         self.internal_processing_queue.push_back(i_link);
-
+        let mut crawled_count : u32 = 0;
         loop {
             let link;
             match self.internal_processing_queue.pop_front() {
@@ -196,6 +210,9 @@ impl Crawler<'_> {
 
             let mut file = File::create(format!("parsed/{}", fna)).unwrap();
             let mut stemmed_file = File::create(format!("stemmed/{}", fna)).unwrap();
+            
+            let mut tf = Table::new(); 
+
             for word in list {
                 if counter >= words_per_cluster {
                     counter = 0;
@@ -218,20 +235,74 @@ impl Crawler<'_> {
                 //
                 stemmed_file.write(stemmed_word.as_bytes()).unwrap();
                 stemmed_file.write(b" ").unwrap();
-
+                //TF-IDF
+                let stemmed_key = stemmed_word.to_string();
+                let _get = tf.get(&stemmed_key);
+                match _get {
+                    None => {
+                        let _idf =self.idf_counts_table.get(&stemmed_key);
+                        match _idf {
+                            None => {
+                                self.idf_counts_table.insert(stemmed_key.clone(), 1);
+                            }
+                            Some(idf) => {
+                                self.idf_counts_table.insert(stemmed_key.clone(), idf + 1);
+                            }
+                        }
+                        tf.insert(stemmed_key, 1);
+                    }
+                    Some(val) => {
+                        tf.insert(stemmed_key, val + 1);
+                    }
+                }
             }
             
+            self.tf_counts_table.insert(fna.clone(), tf);
+            self.tf_idf.insert(fna.clone(), HashMap::new());
             &self.index_file
                 .write_all(format!("{}|{}\n", link.trim_end(), fna).as_bytes())
                 .expect("error during writing to index file");
             &hash_controller.add(hash_line, &fna);
             self.keys_order.push(fna);
+
             self.browsed_count += 1;
-            if self.browsed_count >= count {
+            crawled_count += 1;
+            self.pages_count+=1;
+
+            if crawled_count >= count {
                 break;
             }
         }
+        
+        let mut table = prettytable::Table::new();
+        
+        for idf in &self.idf_counts_table {
+            let mut row : Vec::<prettytable::Cell> = Vec::new();
+            let _idf = (*idf.1 as f64)/(self.tf_counts_table.len() as f64);
+            row.push(prettytable::Cell::new(idf.0));
+            let idf_string = format!("idf:{}", _idf);
+            row.push(prettytable::Cell::new(&idf_string));
+            for tf_table in &self.tf_counts_table {
+                let tf_idf_table = self.tf_idf.get_mut(tf_table.0).unwrap();
+                match tf_table.1.get(idf.0) {
+                    None => {
+                        tf_idf_table.insert(idf.0.to_string(), 0_f64);
+                        row.push(prettytable::Cell::new("tf: 0\ntf-idf: 0"));
+                    }
+                    Some(value) => {
+                        let tf = (*value as f64)/(tf_table.1.len() as f64);
+                        let tf_idf = (*value as f64 / (tf_table.1.len() as f64))/(_idf);
+                        let string = format!("tf: {:.5}\ntf-idf: {:.3}", tf, tf_idf);
+                        tf_idf_table.insert(idf.0.to_string(), tf_idf);
+                        row.push(prettytable::Cell::new(&string));
+                    }
+                }
+            }
+            table.add_row(prettytable::Row::new(row));
+        }
 
+        let mut table_file = File::create("./tf_idf.txt").unwrap();
+        table.print(&mut table_file);
         return;
     }
     
@@ -293,5 +364,59 @@ impl Crawler<'_> {
 
         
         return false;
+    }
+
+    pub fn search(&self, search_string : &str) {
+        let split = search_string.split_whitespace();
+        let mut split_vec = Vec::<String>::new();
+        for word in split {
+            split_vec.push(word.to_owned());
+        }
+        let mut search_tf_idf : HashMap<String, f64> = HashMap::new();
+
+        for word in &split_vec {
+            let ru_stemmed = &self.ru_stemmer.stem(word);
+            let stemmed = &self.en_stemmer.stem(ru_stemmed);
+            search_tf_idf.insert(stemmed.to_string(), 1_f64 / (split_vec.len() as f64));
+        }
+        let mut rated = Vec::<(f64,String)>::new();
+        for doc_tf_idf in &self.tf_idf {
+            let mut used_words = 0;
+            let mut search_vec = Vec::<f64>::new();
+            let mut doc_vec= Vec::<f64>::new();
+            for word in doc_tf_idf.1 {
+                match search_tf_idf.get(word.0) {
+                    None => {
+                        search_vec.push(0_f64);
+                        doc_vec.push(*word.1);
+                    }
+                    Some(tf_idf) => {
+                        search_vec.push(*tf_idf);
+                        doc_vec.push(*word.1);
+                        used_words+=1;
+                    }
+                }
+            }
+            if used_words < search_tf_idf.len() {
+                for word in &search_tf_idf {
+                    match doc_tf_idf.1.get(word.0) {
+                        None => {
+                            search_vec.push(*word.1);
+                            doc_vec.push(0_f64);
+                        }
+                        Some(_) => {
+                        }
+                    }
+                }
+            }
+            let doc_array = ndarray::arr1(&doc_vec);
+            let rating = ndarray::arr1(&search_vec).dot(&doc_array);
+            rated.push((rating, doc_tf_idf.0.to_owned()));
+        }
+        rated.sort_by(|a,b| a.0.partial_cmp(&b.0).unwrap());
+        rated.reverse();
+        for item in &rated[0..10] {
+            println!("{}:{}",item.0, item.1);
+        }
     }
 }

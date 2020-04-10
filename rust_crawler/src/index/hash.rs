@@ -150,7 +150,6 @@ impl FileHasher {
 
         for key in keys {
             let item = self.map.get(key).unwrap();
-            println!("{}", item.len());
             let usize_buf : [u8; 8] = unsafe {std::mem::transmute(item.len())};
             file.write(&usize_buf).expect("never fails");
             for hb in item {
@@ -176,7 +175,6 @@ impl FileHasher {
                 while ptr < bytes.len() {
                     usize_buf.copy_from_slice(&bytes[ptr..ptr+8]);
                     let size : usize = unsafe {std::mem::transmute(usize_buf)};
-                    println!("{}", size);
                     ptr += 8;
                     let mut hash_vec : Vec<HashBox> = Vec::new(); 
                     for i in 0..size {
@@ -191,7 +189,7 @@ impl FileHasher {
                 //std::mem::transmute(e: T) 
 
             }
-            Err(err) => {
+            Err(_) => {
             }
         }
         hasher

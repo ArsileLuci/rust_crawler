@@ -69,8 +69,10 @@ async fn main() {
                         println!("{:?}", lexem::parse_to_lexem(&query).unwrap());
                         println!("lexem result in: {:?}", hash_controller.look_out_hash(lexem::parse_to_lexem(&query).unwrap()));
                     },
-                    "tf-idf" => {
-                        let folder = std::fs::read_dir("stemmed");
+                    "search" => {
+                        let mut search = String::new(); 
+                        io::stdin().read_line(&mut search).unwrap();
+                        crawler.search(search.trim_end());
                     },
                     _ => {
                         println!("unknown command, try to use crawl and query");
